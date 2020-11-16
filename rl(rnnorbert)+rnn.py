@@ -42,7 +42,7 @@ def showPlot(points):
 
 if __name__ == "__main__":
     training_data, test_data = loadData()
-    n_iter = 500
+    n_iter = int(5e4)
     #algo = BertPolicyGradientAlgo(n_iter, 10, training_data)
     algo = NoBertPolicyGradientAlgo(n_iter, 10, training_data, test_data)
     algo.run()

@@ -114,14 +114,14 @@ def convert():
             correcteds[id] = corrected
     f.close()
 
-    f = open("data/pycorrector_data.txt", "r")
+    """f = open("data/pycorrector_data.txt", "r")
     for x in f:
         [src, target] = x.split('\t')
         pid = uuid.uuid4()
         src, target = src.replace(" ", "").strip(), target.replace(" ", "").strip()
         if (len(src) <= MAX_LENGTH and len(target) <= MAX_LENGTH):
             passages[pid] = src
-            correcteds[pid] = target
+            correcteds[pid] = target"""
 
     p, c = [], []
     for id in passages.keys():
@@ -132,7 +132,7 @@ def convert():
     dataset = pd.DataFrame(columns=['source','reference'])
     dataset['source'] = p
     dataset['reference'] = c
-    dataset.to_csv("data/data5.csv", index=False)
+    dataset.to_csv("data/sighan10.csv", index=False)
 
 if __name__ == "__main__":
     convert()

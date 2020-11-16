@@ -3,6 +3,7 @@ from __future__ import unicode_literals, print_function, division
 from io import open
 from transformers import BertTokenizer, BertModel, BertConfig
 from collections import namedtuple
+import traceback 
 
 import unicodedata
 import string
@@ -23,11 +24,11 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 SOS_token = 0
 EOS_token = 1
-MAX_LENGTH = 7
+MAX_LENGTH = 6
 
 
 def loadData():
-    df = pd.read_csv("data/data5.csv")
+    df = pd.read_csv("data/data/artificial.csv")
     dataset = df.to_numpy()
     np.random.shuffle(dataset)
     split_index = int(len(dataset)*0.9)
@@ -36,24 +37,68 @@ def loadData():
 
 class Trainer(object):
     def __init__(self, agent_params, trainer_params):
-        self.agent = DQNAgent(agent_params)
+        self.agent_params = agent_params
         self.n_iter = trainer_params['n_iter']
+        self.multiplier = trainer_params['multiplier']
         self.train_n_iter = trainer_params['train_n_iter']
         self.train_batch_size = trainer_params['train_batch_size']
         self.reward = []
 
     def run(self):
+        try:
+          loaded = torch.load('saved/misc.pt')
+          epoch_trained = loaded['epoch']
+          reward = loaded['reward']
+          t = loaded['t']
+          num_param_updates = loaded['num_param_updates']
+          replay_buffer_params = torch.load('saved/replay_buffer.pt')
+        except Exception as e:
+          print("Exception in loading misc due to", e)
+          epoch_trained = 0
+          reward = [] 
+          t = 0
+          num_param_updates = 0
+          replay_buffer_params = {"next_idx":0, "num_in_buffer":0, "obs":None, "action":None, "reward":None, "done":None}
+
+        self.agent_params['t'] = t
+        self.agent_params['num_param_updates'] = num_param_updates
+        self.agent_params['replay_buffer'] = replay_buffer_params
+        self.agent = DQNAgent(self.agent_params)
+        print(t, num_param_updates, replay_buffer_params['num_in_buffer'])
+
         r = 0
-        report_period = 1000
-        for i in range(self.n_iter):
-            r += self.agent.step()
-            self.train()
-            if ((i+1)%report_period == 0):
-                # print the reward of the latest 100 steps
-                print("Progress {:.2f}%, with average reward {}".format(i*100/self.n_iter, r/report_period))
-                self.reward.append(r/report_period)
-                r = 0
-        self.evaluate()
+        report_period = 100 * self.multiplier
+        try:
+          for i in range(self.n_iter):
+              r += self.agent.step()
+              self.train()
+              if ((i+1)%report_period == 0):
+                  # print the reward of the latest 100 steps
+                  print("Progress {:.2f}%, with average reward {}".format(i*100/self.n_iter, r/report_period))
+                  self.reward.append(r/report_period)
+                  r = 0
+          #self.evaluate()
+        except Exception as e:
+          print("Exception has occured, saving models now...")
+          print("Exception due to", e)
+          traceback.print_exc()
+
+        reward.extend(self.reward) #agglomerate historic rewards
+        self.reward = reward
+
+        torch.save(self.agent.critic.q_target_decoder.state_dict(), 'saved/q_target_decoder.pt')
+        torch.save(self.agent.critic.q_decoder.state_dict(), 'saved/q_decoder.pt')
+        torch.save(self.agent.critic.optimizer.state_dict(), 'saved/optimizer.pt')
+        torch.save(self.agent.critic.learning_rate_scheduler.state_dict(), 'saved/learning_rate_scheduler.pt')
+        torch.save({'epoch': epoch_trained + i, 'reward': self.reward, 't':self.agent.t, 'num_param_updates': self.agent.num_param_updates}, 'saved/misc.pt')
+        torch.save({"next_idx":self.agent.replay_buffer.next_idx, 
+                    "num_in_buffer":self.agent.replay_buffer.num_in_buffer, 
+                    "obs":self.agent.replay_buffer.obs, 
+                    "action":self.agent.replay_buffer.action, 
+                    "reward":self.agent.replay_buffer.reward, 
+                    "done":self.agent.replay_buffer.done}, 'saved/replay_buffer.pt')
+        print("Trained {} iterations in total".format(epoch_trained + i))
+        
 
     def train(self):
         for i in range(self.train_n_iter):
@@ -92,22 +137,26 @@ class Trainer(object):
             print('>', ''.join(translated))
             print('')
 
-
-
-
-    
 class WeakEnvironment(object):
     def __init__(self, train_data, test_data):
         self.encoder = EncoderRNN()
+        for param in self.encoder.parameters():
+          param.requires_grad = False
         self.train_data = train_data
         self.test_data = test_data
         self.input_ids = self.encoder.embed([train_data, test_data]) 
         self.lang = self.encoder.lang
         # decoder doesn't return actions but Q values, so no action distribution, only action based on Q values
         self.decoder = AttnDecoder(self.encoder.hidden_size, self.encoder.input_size)
+        for param in self.decoder.parameters():
+          param.requires_grad = False
+        if torch.cuda.is_available():
+          self.encoder = self.encoder.cuda()
+          self.decoder = self.decoder.cuda()
         self.action_space = [i for i in range(self.encoder.input_size)]
         self.criterion = nn.NLLLoss()
         self.env_max_step = MAX_LENGTH
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     def random_actions(self):
         #return torch.log_softmax(torch.ones((1, self.encoder.input_size))), np.random.choice(self.action_space)
         action = np.array([np.random.choice(self.action_space)])
@@ -121,7 +170,10 @@ class WeakEnvironment(object):
         
         prev_hidden = torch.from_numpy(observation[2])
         encoder_padded = torch.from_numpy(observation[1])
-        decoded_result = self.decoder(torch.tensor([[action[0]]]), prev_hidden, encoder_padded)
+
+        action_cur = torch.tensor([[action[0]]]).to(self.device)
+        prev_hidden = prev_hidden.to(self.device)
+        decoded_result = self.decoder(action_cur, prev_hidden, encoder_padded)
         next_hidden = ptu.to_numpy(decoded_result[1].detach())
 
         # the reward can't be too small, otherwise no signal
@@ -153,8 +205,10 @@ class WeakEnvironment(object):
 
         encoder_hidden = self.encoder.initHidden()
         encoder_outputs = torch.zeros(self.env_max_step, self.encoder.hidden_size, device=device)
+
+        src_id = torch.tensor(src_id).to(self.device)
         for ei in range(input_length):
-            encoder_output, encoder_hidden = self.encoder(torch.tensor(src_id[ei]),encoder_hidden)
+            encoder_output, encoder_hidden = self.encoder(src_id[ei],encoder_hidden)
             encoder_outputs[ei] += encoder_output[0, 0]
 
         encoder_padded = torch.zeros(1, self.env_max_step, self.decoder.hidden_size)
@@ -172,13 +226,13 @@ class WeakEnvironment(object):
 
 class DQNAgent(object):
     def __init__(self, params):
-        self.t = 0
+        self.t = params['t']
         self.exploration = params['exploration_schedule']
         self.batch_size = params['batch_size']
-        self.replay_buffer = ReplayBuffer(params['replay_buffer_size'], params['frame_history_len'])
+        self.replay_buffer = ReplayBuffer(params['replay_buffer_size'], params['frame_history_len'], params['replay_buffer'])
         self.learning_starts = params['learning_starts']
         self.learning_freq = params['learning_freq']
-        self.num_param_updates = 0
+        self.num_param_updates = params['num_param_updates']
         self.target_update_freq = params['target_update_freq']
         self.optimizer_spec = params['optimizer_spec']
         self.env = WeakEnvironment(params['train'], params['test'])
@@ -241,6 +295,15 @@ class DQNCritic(object):
         # should be independent from q networks, and should not be updated since it is the env
         self.q_target_decoder = AttnDecoder(self.encoder.hidden_size, self.encoder.input_size)
         self.q_decoder = AttnDecoder(self.encoder.hidden_size, self.encoder.input_size)
+        try:
+          self.q_target_decoder.load_state_dict(torch.load('saved/q_target_decoder.pt'))
+          self.q_target_decoder.train()
+          self.q_decoder.load_state_dict(torch.load('saved/q_decoder.pt'))
+          self.q_decoder.train()
+          print("奥利给!Model Loaded!")
+        except Exception as e:
+          print("Attempting to load saved model but failed due to", e)
+         
         self.loss = nn.SmoothL1Loss()
         self.grad_norm_clipping = params['grad_norm_clipping']
         self.optimizer_spec = optimizer_spec
@@ -248,16 +311,43 @@ class DQNCritic(object):
             self.q_decoder.parameters(),
             **self.optimizer_spec.optim_kwargs
         )
+        try: 
+          self.optimizer.load_state_dict(torch.load('saved/optimizer.pt'))
+          print("奥利给!Optimizer Loaded!")
+        except Exception as e:
+          print("Attempting to load saved optimizer but failed due to", e)
         self.learning_rate_scheduler = optim.lr_scheduler.LambdaLR(
             self.optimizer,
             self.optimizer_spec.learning_rate_schedule,
         )
+        try: 
+          self.learning_rate_scheduler.load_state_dict(torch.load('saved/learning_rate_scheduler.pt'))
+          print("奥利给!Learning rate scheduler Loaded!")
+        except Exception as e:
+          print("Attempting to load saved learning rate scheduler but failed due to", e)
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        if torch.cuda.is_available():
+          self.encoder = self.encoder.cuda()
+          self.decoder = self.decoder.cuda()
+          self.q_decoder = self.q_decoder.cuda()
+          self.q_target_decoder = self.q_target_decoder.cuda()
+        
+          # has to do this when use load_state_dict with optimizer https://github.com/pytorch/pytorch/issues/2830
+          for state in self.optimizer.state.values():
+            for k, v in state.items():
+                if isinstance(v, torch.Tensor):
+                    state[k] = v.cuda()
+
+
 
     def q_net_target(self, ob):
         encoder_padded = ptu.from_numpy(np.array(ob[:,1].tolist()).astype(np.float32))[:,0,:,:]
         decoder_hidden = ptu.from_numpy(np.array(ob[:,2].tolist()).astype(np.float32))[:,0,:,:]
         decoder_input = ptu.from_numpy(np.array(ob[:,3].tolist()).astype(np.float32)).long()
-        
+
+        encoder_padded = encoder_padded.to(self.device)
+        decoder_hidden = decoder_hidden.to(self.device)
+        decoder_input = decoder_input.to(self.device)
         output, _, _ = self.q_target_decoder(decoder_input, decoder_hidden, encoder_padded)
         return output.squeeze()
     
@@ -266,6 +356,9 @@ class DQNCritic(object):
         decoder_hidden = ptu.from_numpy(np.array(ob[:,2].tolist()).astype(np.float32))[:,0,:,:]
         decoder_input = ptu.from_numpy(np.array(ob[:,3].tolist()).astype(np.float32)).long()
 
+        decoder_input = decoder_input.to(self.device)
+        decoder_hidden = decoder_hidden.to(self.device)
+        encoder_padded = encoder_padded.to(self.device)
         output, _, _ = self.q_decoder(decoder_input, decoder_hidden, encoder_padded)
         return output.squeeze()
 
@@ -277,11 +370,16 @@ class DQNCritic(object):
         reward_n = ptu.from_numpy(reward_n)
         terminal_n = ptu.from_numpy(terminal_n)
 
+        ac_na = ac_na.to(self.device)
         q = torch.gather(self.q_net(ob_no), 1, ac_na.unsqueeze(1)).squeeze()
         #print('q', q.shape)
         ac_qmax = torch.argmax(self.q_net(next_ob_no), dim=1).unsqueeze(1)
+
+        # next_ob_no = next_ob_no.to(self.device)
         q_target = self.q_net_target(next_ob_no)
         q_target_plug_in = q_target.gather(1, ac_qmax).squeeze()
+        terminal_n = terminal_n.to(self.device)
+        reward_n = reward_n.to(self.device)
         target = reward_n + q_target_plug_in*(torch.logical_not(terminal_n)).detach()
 
         loss = self.loss(q, target)
@@ -317,16 +415,16 @@ class ArgMaxPolicy(object):
         return action
 
 class ReplayBuffer(object):
-    def __init__(self, size, frame_history_len):
+    def __init__(self, size, frame_history_len, params):
         self.size = size
         self.frame_history_len = frame_history_len
-        self.next_idx      = 0
-        self.num_in_buffer = 0
+        self.next_idx      = params['next_idx']
+        self.num_in_buffer = params['num_in_buffer']
 
-        self.obs = None
-        self.action = None
-        self.reward = None
-        self.done = None
+        self.obs = params['obs']
+        self.action = params['action']
+        self.reward = params['reward']
+        self.done = params['done']
 
     def can_sample(self, batch_size):
         return batch_size + 1 <= self.num_in_buffer
@@ -417,7 +515,7 @@ class EncoderRNN(nn.Module):
         print("Reading Chinese Frequency Corpus")
         chinese = Lang("chinese")
         
-        df = pd.read_csv("data/data5.csv")
+        df = pd.read_csv("data/data/artificial.csv")
         for s in df['source']:
             chinese.addSentence(s)
         for s in df['reference']:
@@ -495,6 +593,7 @@ class AttnDecoder(nn.Module):
         
         attn_weights = F.softmax(
             self.attn(torch.cat((embedded, hidden), 2)), dim=2)
+        encoder_outputs = encoder_outputs.to(self.device)
         attn_applied = torch.bmm(attn_weights, encoder_outputs)
         #print(embedded.size(), attn_applied.size())
 

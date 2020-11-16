@@ -232,10 +232,14 @@ class NoBertPolicyGradientAlgo(object):
             #print(decoder_input.shape, decoder_hidden.shape, encoder_padded.shape)
             action_distribution, output, decoder_hidden, _ = self.decoder(decoder_input, decoder_hidden, encoder_padded)
             action_variance = np.sqrt(2*np.log(self.t)/self.seen_action)
-            weighted_output = output.detach().numpy()+action_variance
-            action = torch.tensor([[np.argmax(weighted_output)]])
-            while action.item() == 0 or action.item() == 1:
-                action = action_distribution.sample() # won't allow SOS & EOS mid sentence
+            weighted_output = output.detach().numpy()*action_variance
+
+            action = action_distribution.sample()
+            #action = torch.tensor([[np.argmax(weighted_output)]])
+            #action = torch.tensor([[torch.argmax(output)]])
+            #while action.item() == 0 or action.item() == 1:
+            #    action = action_distribution.sample() # won't allow SOS & EOS mid sentence
+            
             loss += self.criterion(output[0], torch.tensor([target_id[i]]))
             
             decoder_input = torch.tensor(action)
@@ -284,15 +288,17 @@ class NoBertPolicyGradientAlgo(object):
             action_distribution, output, decoder_hidden, _ = self.decoder(decoder_input, decoder_hidden, encoder_padded)
 
             action_variance = np.sqrt(2*np.log(self.t)/self.seen_action)
-            weighted_output = output.detach().numpy()+action_variance
+            weighted_output = output.detach().numpy()*action_variance
             
             # it is very hard here because there isn't really a right direction! it is either correct or completely wrong.
             # your problem is that you don't see correct actions often because all of the others are completely wrong
             # 1/x to encourage close prediction a lot more
-            
-            action = torch.tensor([[np.argmax(weighted_output)]])#action_distribution.sample()#torch.tensor([[torch.argmax(weighted_output).item()]])#
-            while action.item() == 0 or action.item() == 1:
-                action = action_distribution.sample() # won't allow SOS & EOS mid sentence
+
+            action = action_distribution.sample()
+            #action = torch.tensor([[np.argmax(weighted_output)]])
+            #action = torch.tensor([[torch.argmax(output)]])
+            #while action.item() == 0 or action.item() == 1:
+            #    action = action_distribution.sample() # won't allow SOS & EOS mid sentence
             actions.append(action)
             self.seen_action[action.item()] += 1
             
