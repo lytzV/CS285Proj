@@ -3,7 +3,7 @@ import pandas as pd
 from hanziconv import HanziConv
 import uuid
 
-MAX_LENGTH = 5
+MAX_LENGTH = 10
 
 def convert():
     # if encounters UnicodeDecode warning, go to that sgml file and type a space somewhere safe lol and you can remove it

@@ -24,7 +24,7 @@ MAX_LENGTH = 52 # take into account the CLS&SEP that will be added later
 
 
 def loadData():
-    df = pd.read_csv("data/data50.csv")
+    df = pd.read_csv("data/sighan10.csv")
     dataset = df.to_numpy()
     np.random.shuffle(dataset)
     split_index = int(len(dataset)*0.9)
@@ -47,6 +47,18 @@ class Lang:
             self.word2index[word] = self.next_index
             self.index2word[self.next_index] = word
             self.next_index += 1 
+    
+    def addConfusion(self):
+      self.confused = {key: [] for key in self.index2word.keys()} 
+      f = open('confusion.txt',"r")
+      for line in f:
+          if line[0] in self.word2index.keys():
+              key = self.word2index[line[0]]
+              confusions = []
+              for w in line[2:-1]:
+                  if w in self.word2index.keys():
+                    confusions.append(self.word2index[w])
+              self.confused[key] = confusions
 
 
 class ChinBERT(nn.Module):
@@ -102,6 +114,7 @@ class EncoderRNN(nn.Module):
         super(EncoderRNN, self).__init__()
         self.lang = None
         self.prepareData()
+        self.lang.addConfusion()
         self.input_size = self.lang.next_index
         self.hidden_size = 256
         self.input_ids = {}
@@ -315,8 +328,12 @@ def train(input_sentence, target_sentence, encoder, decoder, criterion, max_leng
         #print(decoder_input.shape, decoder_hidden.shape, encoder_padded.shape)
         action_distribution, output, decoder_hidden, _ = decoder(decoder_input, decoder_hidden, encoder_padded)
         loss += criterion(output[0], torch.tensor([target_id[i]]))
-        action = action_distribution.sample()
-        decoder_input = torch.tensor(action) #torch.tensor([[target_id[i]]]) #torch.tensor(action)#torch.tensor(torch.argmax(decoder_output)) #torch.tensor([target_input_ids[i]])
+        next_id_in_src = src_id[i].item()
+        easily_confused = encoder.lang.confused[next_id_in_src]+[next_id_in_src]
+        output_of_interest = (easily_confused,output[:,:,easily_confused])
+        action = torch.tensor([[output_of_interest[0][torch.argmax(output_of_interest[1], dim=2)]]])
+        #action = action_distribution.sample()
+        decoder_input = torch.tensor(action) #torch.tensor([[target_id[i]]]) #torch.tensor(action)#torch.tensor(torch.argmax(decoder_output)) torch.tensor([[target_id[i]]])
         translated_sentence.append(action)
 
     loss.backward()
@@ -458,7 +475,11 @@ def evaluate(input_sentence, target_sentence, encoder, decoder, criterion, max_l
         #print(decoder_input.shape, decoder_hidden.shape, encoder_padded.shape)
         action_distribution, output, decoder_hidden, _ = decoder(decoder_input, decoder_hidden, encoder_padded)
         loss += criterion(output[0], torch.tensor([target_id[i]]))
-        action = action_distribution.sample()
+        next_id_in_src = src_id[i].item()
+        easily_confused = encoder.lang.confused[next_id_in_src]+[next_id_in_src]
+        output_of_interest = (easily_confused,output[:,:,easily_confused])
+        action = torch.tensor([[output_of_interest[0][torch.argmax(output_of_interest[1], dim=2)]]])
+        #action = action_distribution.sample()
         decoder_input = torch.tensor(action) #torch.tensor(action)#torch.tensor(torch.argmax(decoder_output)) #torch.tensor([target_input_ids[i]])
         translated_sentence.append(action)
 
@@ -505,3 +526,8 @@ if __name__ == "__main__":
     #evaluateAndShowAttention("je ne crains pas de mourir .")
 
     #evaluateAndShowAttention("c est un jeune directeur plein de talent .")
+
+
+
+
+

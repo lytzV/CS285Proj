@@ -14,7 +14,7 @@ from pg import BertPolicyGradientAlgo, NoBertPolicyGradientAlgo
 from pg import Lang
 
 def loadData():
-    df = pd.read_csv("data/data10.csv")
+    df = pd.read_csv("data/sighan10.csv")
     dataset = df.to_numpy()
     np.random.shuffle(dataset)
     split_index = int(len(dataset)*0.9)
@@ -42,7 +42,7 @@ def showPlot(points):
 
 if __name__ == "__main__":
     training_data, test_data = loadData()
-    n_iter = int(5e4)
+    n_iter = 500
     #algo = BertPolicyGradientAlgo(n_iter, 10, training_data)
     algo = NoBertPolicyGradientAlgo(n_iter, 10, training_data, test_data)
     algo.run()

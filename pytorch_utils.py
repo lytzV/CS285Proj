@@ -7,3 +7,9 @@ def from_numpy(*args, **kwargs):
 
 def to_numpy(tensor):
     return tensor.to('cpu').detach().numpy()
+
+def normalize(data, mean, std, eps=1e-8):
+    return (data-mean)/(std+eps)
+
+def unnormalize(data, mean, std):
+    return data*std+mean

@@ -24,11 +24,11 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 SOS_token = 0
 EOS_token = 1
-MAX_LENGTH = 6
-
+MAX_LENGTH = 12
+FILE_PATH = "data/sighan10.csv"
 
 def loadData():
-    df = pd.read_csv("data/data/artificial.csv")
+    df = pd.read_csv(FILE_PATH)
     dataset = df.to_numpy()
     np.random.shuffle(dataset)
     split_index = int(len(dataset)*0.9)
@@ -43,61 +43,68 @@ class Trainer(object):
         self.train_n_iter = trainer_params['train_n_iter']
         self.train_batch_size = trainer_params['train_batch_size']
         self.reward = []
+        self.eval_rewards = []
 
     def run(self):
         try:
-          loaded = torch.load('saved/misc.pt')
-          epoch_trained = loaded['epoch']
-          reward = loaded['reward']
-          t = loaded['t']
-          num_param_updates = loaded['num_param_updates']
-          replay_buffer_params = torch.load('saved/replay_buffer.pt')
+            loaded = torch.load('saved/misc.pt')
+            epoch_trained = loaded['epoch']
+            reward = loaded['reward']
+            eval_rewards = loaded['eval_reward']
+            t = loaded['t']
+            num_param_updates = loaded['num_param_updates']
+            replay_buffer_params = torch.load('saved/replay_buffer.pt')
         except Exception as e:
-          print("Exception in loading misc due to", e)
-          epoch_trained = 0
-          reward = [] 
-          t = 0
-          num_param_updates = 0
-          replay_buffer_params = {"next_idx":0, "num_in_buffer":0, "obs":None, "action":None, "reward":None, "done":None}
+            print("Exception in loading misc due to", e)
+            epoch_trained = 0
+            reward = [] 
+            eval_rewards = []
+            t = 0
+            num_param_updates = 0
+            replay_buffer_params = {"next_idx":0, "num_in_buffer":0, "obs":None, "action":None, "reward":None, "done":None}
 
         self.agent_params['t'] = t
         self.agent_params['num_param_updates'] = num_param_updates
         self.agent_params['replay_buffer'] = replay_buffer_params
         self.agent = DQNAgent(self.agent_params)
-        print(t, num_param_updates, replay_buffer_params['num_in_buffer'])
 
         r = 0
-        report_period = 100 * self.multiplier
+        report_period = 50000 * self.multiplier
         try:
-          for i in range(self.n_iter):
-              r += self.agent.step()
-              self.train()
-              if ((i+1)%report_period == 0):
-                  # print the reward of the latest 100 steps
-                  print("Progress {:.2f}%, with average reward {}".format(i*100/self.n_iter, r/report_period))
-                  self.reward.append(r/report_period)
-                  r = 0
-          #self.evaluate()
-        except Exception as e:
-          print("Exception has occured, saving models now...")
-          print("Exception due to", e)
-          traceback.print_exc()
+            for i in range(self.n_iter):
+                r += self.agent.step()
+                self.train()
+                if ((i+1)%report_period == 0):
+                    # print the reward of the latest 100 steps
+                    print("Progress {:.2f}%, with average reward {}".format(i*100/self.n_iter, r/report_period))
+                    self.reward.append(r/report_period)
+                    r = 0
+                    eval_reward = self.evaluate()
+                    self.eval_rewards.append(eval_reward)
+        except:
+            print("Exception has occured, saving models now...")
+            #print("Exception due to", e)
+            traceback.print_exc()
+        finally:
+            reward.extend(self.reward) #agglomerate historic rewards
+            eval_rewards.extend(self.eval_rewards)
+            self.reward = reward
+            self.eval_rewards = eval_rewards
 
-        reward.extend(self.reward) #agglomerate historic rewards
-        self.reward = reward
-
-        torch.save(self.agent.critic.q_target_decoder.state_dict(), 'saved/q_target_decoder.pt')
-        torch.save(self.agent.critic.q_decoder.state_dict(), 'saved/q_decoder.pt')
-        torch.save(self.agent.critic.optimizer.state_dict(), 'saved/optimizer.pt')
-        torch.save(self.agent.critic.learning_rate_scheduler.state_dict(), 'saved/learning_rate_scheduler.pt')
-        torch.save({'epoch': epoch_trained + i, 'reward': self.reward, 't':self.agent.t, 'num_param_updates': self.agent.num_param_updates}, 'saved/misc.pt')
-        torch.save({"next_idx":self.agent.replay_buffer.next_idx, 
-                    "num_in_buffer":self.agent.replay_buffer.num_in_buffer, 
-                    "obs":self.agent.replay_buffer.obs, 
-                    "action":self.agent.replay_buffer.action, 
-                    "reward":self.agent.replay_buffer.reward, 
-                    "done":self.agent.replay_buffer.done}, 'saved/replay_buffer.pt')
-        print("Trained {} iterations in total".format(epoch_trained + i))
+            torch.save(self.agent.critic.q_target_decoder.state_dict(), 'saved/q_target_decoder.pt')
+            torch.save(self.agent.critic.q_decoder.state_dict(), 'saved/q_decoder.pt')
+            torch.save(self.agent.critic.optimizer.state_dict(), 'saved/optimizer.pt')
+            torch.save(self.agent.critic.learning_rate_scheduler.state_dict(), 'saved/learning_rate_scheduler.pt')
+            torch.save({'epoch': epoch_trained + i, 'reward': self.reward, 'eval_reward': self.eval_rewards, 't':self.agent.t, 'num_param_updates': self.agent.num_param_updates}, 'saved/misc.pt')
+            torch.save({"next_idx":self.agent.replay_buffer.next_idx, 
+                        "num_in_buffer":self.agent.replay_buffer.num_in_buffer, 
+                        "obs":self.agent.replay_buffer.obs, 
+                        "action":self.agent.replay_buffer.action, 
+                        "reward":self.agent.replay_buffer.reward, 
+                        "done":self.agent.replay_buffer.done}, 'saved/replay_buffer.pt')
+            torch.save(self.agent.env.encoder.state_dict(),'saved/env_encoder.pt')
+            torch.save(self.agent.env.decoder.state_dict(),'saved/env_decoder.pt')
+            print("Trained {} iterations in total".format(epoch_trained + i))
         
 
     def train(self):
@@ -106,7 +113,7 @@ class Trainer(object):
             self.agent.train(ob_batch, ac_batch, re_batch, next_ob_batch, terminal_batch)
 
     def evaluate(self):
-        print("Training Set Eval")
+        """print("Training Set Eval")
         for t in self.agent.env.train_data:
             src = t[0]
             trg = t[1]
@@ -121,25 +128,35 @@ class Trainer(object):
             print('<', trg)
             print('>', ''.join(translated))
             print('')
-        print("Test Set Eval")
+        print("Test Set Eval")"""
+        steps, r = 0, 0
         for t in self.agent.env.test_data:
             src = t[0]
             trg = t[1]
-            self.agent.last_obs = self.agent.env.reset(True, t)
+            test_obs = self.agent.env.reset(True, t)
             translated = []
             for i in range(len(trg)):
-                action = self.agent.actor.get_actions(self.agent.last_obs)
-                obs, reward, done = self.agent.env.step(self.agent.last_obs, action)
+                action = self.agent.actor.get_actions(test_obs)
+                obs, reward, done = self.agent.env.step(test_obs, action)
                 translated.append(self.agent.env.lang.index2word[action.item()])
-                self.agent.last_obs = obs
-            print('=', src)
-            print('<', trg)
-            print('>', ''.join(translated))
-            print('')
+                test_obs = obs
+
+                steps += 1
+                r += reward
+        return r/steps
+            #print('=', src)
+            #print('<', trg)
+            #print('>', ''.join(translated))
+            #print('')
 
 class WeakEnvironment(object):
     def __init__(self, train_data, test_data):
         self.encoder = EncoderRNN()
+        try:
+          self.encoder.load_state_dict(torch.load('saved/env_encoder.pt'))
+        except Exception as e:
+          print("Attempting to load env encoder due to", e)
+        self.encoder.eval()
         for param in self.encoder.parameters():
           param.requires_grad = False
         self.train_data = train_data
@@ -148,6 +165,11 @@ class WeakEnvironment(object):
         self.lang = self.encoder.lang
         # decoder doesn't return actions but Q values, so no action distribution, only action based on Q values
         self.decoder = AttnDecoder(self.encoder.hidden_size, self.encoder.input_size)
+        try:
+          self.decoder.load_state_dict(torch.load('saved/env_decoder.pt'))
+        except Exception as e:
+          print("Attempting to load env decoder due to", e)
+        self.decoder.eval()
         for param in self.decoder.parameters():
           param.requires_grad = False
         if torch.cuda.is_available():
@@ -238,7 +260,7 @@ class DQNAgent(object):
         self.env = WeakEnvironment(params['train'], params['test'])
         self.critic = DQNCritic(params['critic_params'], self.optimizer_spec, self.env)
         self.last_obs = self.env.reset()
-        self.actor = ArgMaxPolicy(self.critic, self.t, self.env.action_space)
+        self.actor = ArgMaxPolicy(self.critic, self.t, self.env.action_space, self.env.lang)
     
     def step(self):
         self.replay_buffer_idx = self.replay_buffer.store_frame(self.last_obs)
@@ -398,11 +420,12 @@ class DQNCritic(object):
 
 class ArgMaxPolicy(object):
 
-    def __init__(self, critic, t, action_space):
+    def __init__(self, critic, t, action_space, lang):
         self.critic = critic
         self.t = t
         self.action_space = action_space
         self.seen_action = np.array([1e-6 for _ in range(len(action_space))])
+        self.lang = lang
 
     def get_actions(self, obs):
         observation = np.array(obs, dtype=object).reshape(-1,5)
@@ -410,7 +433,19 @@ class ArgMaxPolicy(object):
         qval = self.critic.qa_values(observation)
         action_variance = np.sqrt(2*np.log(self.t))/self.seen_action
         explorating_qval = qval+action_variance
-        action = np.array([np.argmax(qval)])
+        batch_size = len(observation)
+
+        next_pos_to_predict = observation[:,4].tolist()
+        src = observation[:,0].tolist()
+        
+        next_id_in_src = [self.lang.word2index[src[i][next_pos_to_predict[i]]] for i in range(batch_size)]
+        # you have to allow itself to be predicted as well
+        if False:#len(self.lang.correct_confused[next_id_in_src[0]]) != 0:
+          easily_confused = [self.lang.correct_confused[id] for id in next_id_in_src]
+          qval_of_interest = [(easily_confused[i],qval[easily_confused[i]]) for i in range(batch_size)]
+          action = np.array([q[0][np.argmax(q[1])] for q in qval_of_interest])
+        else:
+          action = np.array([np.argmax(qval)])
 
         return action
 
@@ -486,6 +521,8 @@ class Lang:
         self.word2index = {}
         self.index2word = {0: "SOS", 1: "EOS"}
         self.next_index = 2  # Count SOS and EOS
+        self.confused = None
+        self.correct_confused = None
 
     def addSentence(self, sentence):
         for word in sentence:
@@ -496,12 +533,39 @@ class Lang:
             self.word2index[word] = self.next_index
             self.index2word[self.next_index] = word
             self.next_index += 1 
+    
+    def addConfusion(self):
+      self.confused = {key: [] for key in self.index2word.keys()} 
+      f = open('confusion.txt',"r")
+      for line in f:
+          if line[0] in self.word2index.keys():
+              key = self.word2index[line[0]]
+              confusions = []
+              for w in line[2:-1]:
+                  if w in self.word2index.keys():
+                    confusions.append(self.word2index[w])
+              self.confused[key] = confusions
+    
+    def addCorrectConfusion(self):
+      self.correct_confused = {key: [] for key in self.index2word.keys()} 
+      f = open('confusion.txt',"r")
+      for line in f:
+        if line[0] in self.word2index.keys():
+          correct = self.word2index[line[0]]
+          incorrect = line[2:-1]
+          for w in incorrect:
+            if w in self.word2index.keys():
+              self.correct_confused[self.word2index[w]].append(correct)
+
+    
 
 class EncoderRNN(nn.Module):
     def __init__(self):
         super(EncoderRNN, self).__init__()
         self.lang = None
         self.prepareData()
+        self.lang.addConfusion()
+        self.lang.addCorrectConfusion()
         self.input_size = self.lang.next_index
         self.hidden_size = 256
         self.input_ids = {}
@@ -515,7 +579,7 @@ class EncoderRNN(nn.Module):
         print("Reading Chinese Frequency Corpus")
         chinese = Lang("chinese")
         
-        df = pd.read_csv("data/data/artificial.csv")
+        df = pd.read_csv(FILE_PATH)
         for s in df['source']:
             chinese.addSentence(s)
         for s in df['reference']:
@@ -545,7 +609,6 @@ class EncoderRNN(nn.Module):
             for d in dataset:
                 encodings = self.indexesFromPair(self.lang, d)
                 self.input_ids[d[0]] = encodings
-                #self.attn_masks[d[0]] = [e['attention_mask'][0] for e in encodings] 
         return self.input_ids
 
 class AttnDecoder(nn.Module):

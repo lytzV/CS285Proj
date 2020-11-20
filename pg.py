@@ -157,10 +157,12 @@ class NoBertPolicyGradientAlgo(object):
         print("action space size: ", len(self.action_space))
         self.seen_action = np.array([1e-6 for _ in range(len(self.action_space))])
         self.input_ids = self.encoder.embed([data, test_data]) # cast plaintext to our environment space (input_id)
-        
         self.lang = self.encoder.lang
         print("conversion to input ids done...")
         self.decoder = AttnDecoder(self.encoder.hidden_size, self.encoder.input_size)
+        if torch.cuda.is_available():
+          self.encoder = self.encoder.cuda()
+          self.decoder = self.decoder.cuda()
         self.criterion = nn.NLLLoss()
         self.rewards = []
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -216,8 +218,10 @@ class NoBertPolicyGradientAlgo(object):
 
         encoder_hidden = self.encoder.initHidden()
         encoder_outputs = torch.zeros(self.env_max_step, self.encoder.hidden_size, device=self.device)
+        src_id = torch.tensor(src_id)
+        src_id = src_id.to(self.device)
         for ei in range(input_length):
-            encoder_output, encoder_hidden = self.encoder(torch.tensor(src_id[ei]),encoder_hidden)
+            encoder_output, encoder_hidden = self.encoder(src_id[ei],encoder_hidden)
             encoder_outputs[ei] += encoder_output[0, 0]
 
         encoder_padded = torch.zeros(1, self.env_max_step, self.decoder.hidden_size)
@@ -228,19 +232,22 @@ class NoBertPolicyGradientAlgo(object):
 
         translated_sentence = []
         loss = 0
+
         for i in range(target_length):
             #print(decoder_input.shape, decoder_hidden.shape, encoder_padded.shape)
+            decoder_input = decoder_input.to(self.device)
             action_distribution, output, decoder_hidden, _ = self.decoder(decoder_input, decoder_hidden, encoder_padded)
             action_variance = np.sqrt(2*np.log(self.t)/self.seen_action)
-            weighted_output = output.detach().numpy()*action_variance
-
-            action = action_distribution.sample()
-            #action = torch.tensor([[np.argmax(weighted_output)]])
+            #weighted_output = output.cpu().detach().numpy()+action_variance
+            next_id_in_src = src_id[i].item()
+            easily_confused = self.lang.confused[next_id_in_src]+[next_id_in_src]
+            output_of_interest = (easily_confused,output[:,:,easily_confused])
+            action = torch.tensor([[output_of_interest[0][torch.argmax(output_of_interest[1], dim=2)]]])
             #action = torch.tensor([[torch.argmax(output)]])
             #while action.item() == 0 or action.item() == 1:
             #    action = action_distribution.sample() # won't allow SOS & EOS mid sentence
-            
-            loss += self.criterion(output[0], torch.tensor([target_id[i]]))
+            target_id_cur = torch.tensor([target_id[i]]).to(self.device)
+            loss += self.criterion(output[0], target_id_cur)
             
             decoder_input = torch.tensor(action)
             translated_sentence.append(action)
@@ -254,8 +261,8 @@ class NoBertPolicyGradientAlgo(object):
 
     
     def collectTrajectory(self):
-        #self.encoder.optimizer.zero_grad()
-        #self.decoder.optimizer.zero_grad()
+        self.encoder.optimizer.zero_grad()
+        self.decoder.optimizer.zero_grad()
         states, actions, rewards = [[], [], []], [], []
 
         training_pair = random.choice(self.data)
@@ -268,10 +275,11 @@ class NoBertPolicyGradientAlgo(object):
 
         encoder_hidden = self.encoder.initHidden()
         encoder_outputs = torch.zeros(self.env_max_step, self.encoder.hidden_size, device=self.device)
+        
+        src_id = torch.tensor(src_id).to(self.device)
         for ei in range(input_length):
-            encoder_output, encoder_hidden = self.encoder(torch.tensor(src_id[ei]),encoder_hidden)
+            encoder_output, encoder_hidden = self.encoder(src_id[ei], encoder_hidden)
             encoder_outputs[ei] += encoder_output[0, 0]
-
         encoder_padded = torch.zeros(1, self.env_max_step, self.decoder.hidden_size)
         encoder_padded[:,:len(encoder_outputs),:] = encoder_outputs
         
@@ -280,29 +288,35 @@ class NoBertPolicyGradientAlgo(object):
 
         translated_sentence = []
         loss = 0
+        
         for i in range(target_length):
             states[0].append(decoder_input.tolist())
             states[1].append(decoder_hidden.tolist())
             states[2].append(encoder_padded.tolist())
-             
+
+            decoder_input = decoder_input.to(self.device)
             action_distribution, output, decoder_hidden, _ = self.decoder(decoder_input, decoder_hidden, encoder_padded)
 
             action_variance = np.sqrt(2*np.log(self.t)/self.seen_action)
-            weighted_output = output.detach().numpy()*action_variance
+
+            weighted_output = output.cpu().detach().numpy()+action_variance
             
             # it is very hard here because there isn't really a right direction! it is either correct or completely wrong.
             # your problem is that you don't see correct actions often because all of the others are completely wrong
             # 1/x to encourage close prediction a lot more
-
-            action = action_distribution.sample()
-            #action = torch.tensor([[np.argmax(weighted_output)]])
-            #action = torch.tensor([[torch.argmax(output)]])
+            
+            next_id_in_src = src_id[i].item()
+            easily_confused = self.lang.confused[next_id_in_src]+[next_id_in_src]
+            output_of_interest = (easily_confused,output[:,:,easily_confused])
+            action = torch.tensor([[output_of_interest[0][torch.argmax(output_of_interest[1], dim=2)]]])
+            #action = torch.tensor([[torch.argmax(output)]])#action_distribution.sample()#torch.tensor([[torch.argmax(weighted_output).item()]])#
             #while action.item() == 0 or action.item() == 1:
             #    action = action_distribution.sample() # won't allow SOS & EOS mid sentence
             actions.append(action)
             self.seen_action[action.item()] += 1
             
-            l = self.criterion(output[0], torch.tensor([target_id[i]])).item()
+            target_id_cur = torch.tensor([target_id[i]]).to(self.device)
+            l = self.criterion(output[0], target_id_cur).item()
             #reward = 1/(l + 1e-5)
             if (action.item() == target_id[i]):
                 reward = 10 #5/(((abs(l)**3)+1e-5) + 0.05)
@@ -311,17 +325,17 @@ class NoBertPolicyGradientAlgo(object):
             #l = output[0][0][target_id[i]].item()
             #reward = 5/((abs(l)**3)+1e-5) + 0.05
             rewards.append(reward)
-           
-            loss += self.criterion(output[0], torch.tensor([target_id[i]]))
+
+            loss += self.criterion(output[0], target_id_cur)
             #if np.exp(l) > 0.3: print(self.lang.index2word[action.item()], target_plain[i])
             
-            decoder_input = torch.tensor(action)
+            decoder_input = torch.tensor([[target_id[i]]])#torch.tensor(action)
             translated_sentence.append(action)
 
-        #loss.backward()
+        loss.backward()
 
-        #self.decoder.optimizer.step()
-        #self.encoder.optimizer.step()
+        self.decoder.optimizer.step()
+        self.encoder.optimizer.step()
         #print('>', src_plain)
         #print('=', target_plain)
         #print('<', ''.join([self.lang.index2word[w.item()] for w in translated_sentence]))
@@ -378,6 +392,18 @@ class Lang:
             self.word2index[word] = self.next_index
             self.index2word[self.next_index] = word
             self.next_index += 1 
+    
+    def addConfusion(self):
+      self.confused = {key: [] for key in self.index2word.keys()} 
+      f = open('confusion.txt',"r")
+      for line in f:
+          if line[0] in self.word2index.keys():
+              key = self.word2index[line[0]]
+              confusions = []
+              for w in line[2:-1]:
+                  if w in self.word2index.keys():
+                    confusions.append(self.word2index[w])
+              self.confused[key] = confusions
 
 class ChinBERT(nn.Module):
     def __init__(self, dropout=0.3, lr=0.005):
@@ -434,20 +460,20 @@ class EncoderRNN(nn.Module):
         super(EncoderRNN, self).__init__()
         self.lang = None
         self.prepareData()
+        self.lang.addConfusion()
         self.input_size = self.lang.next_index
         self.hidden_size = 256
         self.input_ids = {}
         self.embedding = nn.Embedding(self.input_size, self.hidden_size)
         self.gru = nn.GRU(self.hidden_size, self.hidden_size)
         self.optimizer = optim.Adam(self.parameters())
-        
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     
     def prepareData(self):
         print("Reading Chinese Frequency Corpus")
         chinese = Lang("chinese")
         
-        df = pd.read_csv("data/data10.csv")
+        df = pd.read_csv("data/sighan10.csv")
         for s in df['source']:
             chinese.addSentence(s)
         for s in df['reference']:
@@ -522,7 +548,7 @@ class AttnDecoder(nn.Module):
         embedded = self.embedding(input).view(-1, 1, self.hidden_size)
         embedded = self.dropout(embedded)
 
-        
+        encoder_outputs = encoder_outputs.to(self.device)        
         attn_weights = F.softmax(
             self.attn(torch.cat((embedded, hidden), 2)), dim=2)
         attn_applied = torch.bmm(attn_weights, encoder_outputs)
