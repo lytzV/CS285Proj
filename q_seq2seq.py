@@ -25,7 +25,7 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 SOS_token = 0
 EOS_token = 1
 MAX_LENGTH = 12
-FILE_PATH = "data/data5.csv"
+FILE_PATH = "data/sighan10.csv"
 
 def loadData():
     df = pd.read_csv(FILE_PATH)
@@ -440,7 +440,8 @@ class ArgMaxPolicy(object):
         
         next_id_in_src = [self.lang.word2index[src[i][next_pos_to_predict[i]]] for i in range(batch_size)]
         # you have to allow itself to be predicted as well
-        if False:#len(self.lang.correct_confused[next_id_in_src[0]]) != 0:
+        # TODO: make this batchable here we assume only batch of 1
+        if len(self.lang.correct_confused[next_id_in_src[0]]) != 0:
           easily_confused = [self.lang.correct_confused[id] for id in next_id_in_src]
           qval_of_interest = [(easily_confused[i],qval[easily_confused[i]]) for i in range(batch_size)]
           action = np.array([q[0][np.argmax(q[1])] for q in qval_of_interest])
@@ -521,7 +522,6 @@ class Lang:
         self.word2index = {}
         self.index2word = {0: "SOS", 1: "EOS"}
         self.next_index = 2  # Count SOS and EOS
-        self.confused = None
         self.correct_confused = None
 
     def addSentence(self, sentence):
@@ -534,20 +534,8 @@ class Lang:
             self.index2word[self.next_index] = word
             self.next_index += 1 
     
-    def addConfusion(self):
-      self.confused = {key: [] for key in self.index2word.keys()} 
-      f = open('confusion.txt',"r")
-      for line in f:
-          if line[0] in self.word2index.keys():
-              key = self.word2index[line[0]]
-              confusions = []
-              for w in line[2:-1]:
-                  if w in self.word2index.keys():
-                    confusions.append(self.word2index[w])
-              self.confused[key] = confusions
-    
     def addCorrectConfusion(self):
-      self.correct_confused = {key: [] for key in self.index2word.keys()} 
+      self.correct_confused = {key: [key] for key in self.index2word.keys()} 
       f = open('confusion.txt',"r")
       for line in f:
         if line[0] in self.word2index.keys():
@@ -557,14 +545,11 @@ class Lang:
             if w in self.word2index.keys():
               self.correct_confused[self.word2index[w]].append(correct)
 
-    
-
 class EncoderRNN(nn.Module):
     def __init__(self):
         super(EncoderRNN, self).__init__()
         self.lang = None
         self.prepareData()
-        self.lang.addConfusion()
         self.lang.addCorrectConfusion()
         self.input_size = self.lang.next_index
         self.hidden_size = 256
