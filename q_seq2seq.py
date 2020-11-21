@@ -69,7 +69,7 @@ class Trainer(object):
         self.agent = DQNAgent(self.agent_params)
 
         r = 0
-        report_period = 50000 * self.multiplier
+        report_period = self.n_iter//100
         try:
             for i in range(self.n_iter):
                 r += self.agent.step()

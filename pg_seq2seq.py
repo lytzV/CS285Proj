@@ -41,7 +41,6 @@ class Lang:
         self.word2index = {}
         self.index2word = {0: "SOS", 1: "EOS"}
         self.next_index = 2  # Count SOS and EOS
-        self.confused = None
         self.correct_confused = None
 
     def addSentence(self, sentence):
@@ -54,28 +53,16 @@ class Lang:
             self.index2word[self.next_index] = word
             self.next_index += 1 
     
-    def addConfusion(self):
-        self.confused = {key: [] for key in self.index2word.keys()} 
-        f = open('confusion.txt',"r")
-        for line in f:
-            if line[0] in self.word2index.keys():
-                key = self.word2index[line[0]]
-                confusions = []
-                for w in line[2:-1]:
-                    if w in self.word2index.keys():
-                        confusions.append(self.word2index[w])
-                self.confused[key] = confusions
-    
     def addCorrectConfusion(self):
-        self.correct_confused = {key: [] for key in self.index2word.keys()} 
-        f = open('confusion.txt',"r")
-        for line in f:
-            if line[0] in self.word2index.keys():
-                correct = self.word2index[line[0]]
-                incorrect = line[2:-1]
-                for w in incorrect:
-                    if w in self.word2index.keys():
-                        self.correct_confused[self.word2index[w]].append(correct)
+      self.correct_confused = {key: [key] for key in self.index2word.keys()} 
+      f = open('confusion.txt',"r")
+      for line in f:
+        if line[0] in self.word2index.keys():
+          correct = self.word2index[line[0]]
+          incorrect = line[2:-1]
+          for w in incorrect:
+            if w in self.word2index.keys():
+              self.correct_confused[self.word2index[w]].append(correct)
 
 class Trajectory(object):
     def __init__(self, observations, actions, next_observations, rewards, terminals, length):
@@ -119,7 +106,7 @@ class Trainer(object):
         self.agent = PGAgent(self.agent_params, self.env)
 
         r = 0
-        report_period = 500 * self.multiplier
+        report_period = self.n_iter//100
         try:
             for i in range(self.n_iter):
                 paths, envsteps_this_batch, avg_batch_reward = self.collect_training_trajectories()
@@ -367,6 +354,7 @@ class PGPolicy(object):
 
     def __init__(self, env, learning_rate=1e-4):
         self.env = env
+        self.lang = self.env.encoder.lang
         self.learning_rate = learning_rate
         self.baseline_decoder = self.build_mlp(self.env.encoder.hidden_size, 1, 3, 32)
         self.action_decoder = AttnDecoder(self.env.encoder.hidden_size, self.env.encoder.input_size)
@@ -396,8 +384,18 @@ class PGPolicy(object):
     # query the policy with observation(s) to get selected action(s)
     def get_action(self, ob):
         ob = np.array(ob, dtype=object).reshape(-1,5)
-        action_distribution = self.get_action_distribution(ob)
-        action = action_distribution.sample()  # don't bother with rsample
+        action_distribution, prob = self.get_action_distribution(ob)
+        batch_size = len(ob)
+
+        next_pos_to_predict = ob[:,4].tolist()
+        src = ob[:,0].tolist()
+        next_id_in_src = [self.lang.word2index[src[i][next_pos_to_predict[i]]] for i in range(batch_size)]
+        easily_confused = [self.lang.correct_confused[id] for id in next_id_in_src]
+
+        #action = action_distribution.sample()  # don't bother with rsample
+        #taking the most probable action in its respective confusion set
+        prob_of_interest = [(easily_confused[i], prob[i,easily_confused[i]].squeeze()) for i in range(batch_size)]
+        action = torch.tensor([[prob_of_interest[i][0][torch.argmax(prob_of_interest[i][1])]] for i in range(batch_size)])
         return ptu.to_numpy(action)
 
     def get_action_distribution(self, ob):
@@ -411,8 +409,9 @@ class PGPolicy(object):
         decoder_input = decoder_input.to(device)
 
         output, _, _ = self.action_decoder(decoder_input, decoder_hidden, encoder_padded)
-        action_distribution = torch.distributions.Categorical(probs=F.softmax(output[:,0,:], dim=1))
-        return action_distribution
+        prob = F.softmax(output[:,0,:], dim=1)
+        action_distribution = torch.distributions.Categorical(probs=prob)
+        return action_distribution, prob
         
     def get_baseline(self, ob):
         ob = np.array(ob, dtype=object).reshape(-1,5)
@@ -427,8 +426,8 @@ class PGPolicy(object):
         actions = ptu.from_numpy(actions)
         advantages = ptu.from_numpy(advantages)
         
-        prediction = self.get_action_distribution(observations)
-        negative_loglikelihood_predicted = -prediction.log_prob(actions)
+        action_distribution, probs = self.get_action_distribution(observations)
+        negative_loglikelihood_predicted = -action_distribution.log_prob(actions)
 
         advantages = torch.squeeze(advantages)
         loss = torch.dot(negative_loglikelihood_predicted.squeeze(), advantages)
@@ -511,7 +510,6 @@ class EncoderRNN(nn.Module):
         super(EncoderRNN, self).__init__()
         self.lang = None
         self.prepareData()
-        self.lang.addConfusion()
         self.lang.addCorrectConfusion()
         self.input_size = self.lang.next_index
         self.hidden_size = 256
