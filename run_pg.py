@@ -16,7 +16,7 @@ if __name__ == "__main__":
     trainer_params = {}
     critic_params = {}
 
-    multiplier = 0.4
+    multiplier = 0.2
 
     trainer_params['n_iter'] = int(5e4*multiplier)
     trainer_params['train_n_iter'] = 1

@@ -132,6 +132,7 @@ class Trainer(object):
 
             torch.save(self.agent.actor.baseline_decoder.state_dict(), 'pg/baseline_decoder.pt')
             torch.save(self.agent.actor.action_decoder.state_dict(), 'pg/action_decoder.pt')
+            torch.save(self.agent.actor.baseline_optimizer.state_dict(), 'pg/baseline_optimizer.pt')
             torch.save({'epoch': epoch_trained + i, 'reward': self.reward, 'eval_reward': self.eval_rewards}, 'pg/misc.pt')
             torch.save({"paths":self.agent.replay_buffer.paths, 
                         "next_obs":self.agent.replay_buffer.next_obs, 
@@ -358,10 +359,24 @@ class PGPolicy(object):
         self.learning_rate = learning_rate
         self.baseline_decoder = self.build_mlp(self.env.encoder.hidden_size, 1, 3, 32)
         self.action_decoder = AttnDecoder(self.env.encoder.hidden_size, self.env.encoder.input_size)
+        try:
+          self.baseline_decoder.load_state_dict(torch.load('pg/baseline_decoder.pt'))
+          self.baseline_decoder.train()
+          self.action_decoder.load_state_dict(torch.load('pg/action_decoder.pt'))
+          self.action_decoder.train()
+          print("奥利给!Model Loaded!")
+        except Exception as e:
+          print("Attempting to load policy gradient model but failed due to", e)
         self.baseline_loss = nn.MSELoss()
         self.baseline_optimizer = optim.Adam(
                 self.baseline_decoder.parameters(),
                 self.learning_rate)
+        try: 
+          self.baseline_optimizer.load_state_dict(torch.load('pg/baseline_optimizer.pt'))
+          print("奥利给!Optimizer Loaded!")
+        except Exception as e:
+          print("Attempting to load baseline optimizer but failed due to", e)
+        
 
     def build_mlp(self,
         input_size: int,
