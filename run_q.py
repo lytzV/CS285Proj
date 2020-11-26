@@ -14,7 +14,16 @@ def showPlot(points):
     plt.show()
 
 if __name__ == "__main__":
-    training, testing = loadData()
+    try:
+        training = pd.read_csv('data/sighan50train.csv').to_numpy()
+        testing = pd.read_csv('data/sighan50test.csv').to_numpy()
+        print(training[0])
+    except Exception as e:
+        print(e)
+        training, testing = loadData()
+        pd.DataFrame(training).to_csv("data/sighan50train.csv", index=False)
+        pd.DataFrame(testing).to_csv("data/sighan50test.csv", index=False)
+        print(training[0])
     agent_params = {}
     trainer_params = {}
     critic_params = {}

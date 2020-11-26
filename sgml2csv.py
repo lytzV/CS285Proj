@@ -3,7 +3,7 @@ import pandas as pd
 from hanziconv import HanziConv
 import uuid
 
-MAX_LENGTH = 10
+MAX_LENGTH = 50
 
 def convert():
     # if encounters UnicodeDecode warning, go to that sgml file and type a space somewhere safe lol and you can remove it
@@ -22,8 +22,8 @@ def convert():
         passage = HanziConv.toSimplified(d.find_all('p')[0].text)
         if len(passage) <= MAX_LENGTH:
             corrected = passage.replace(wrong, correction)
-            passages[doc_id] = passage # the very first untampered source sentence
-            correcteds[doc_id] = corrected
+            passages[doc_id] = passage.replace(" ", "") # the very first untampered source sentence
+            correcteds[doc_id] = corrected.replace(" ", "")
     f.close()
 
     f = open("data/sighan7csc_release1.0 2/SampleSet/Bakeoff2013_SampleSet_WithoutError_10001-10350.txt", "r")
@@ -34,8 +34,8 @@ def convert():
         
         passage = HanziConv.toSimplified(d.find_all('p')[0].text)
         if len(passage) <= MAX_LENGTH:
-            passages[doc_id] = passage # the very first untampered source sentence
-            correcteds[doc_id] = passage
+            passages[doc_id] = passage.replace(" ", "") # the very first untampered source sentence
+            correcteds[doc_id] = passage.replace(" ", "")
     f.close()
 
     f = open("data/sighan8csc_release1.0/Training/SIGHAN15_CSC_A2_Training.sgml", "r")
@@ -51,10 +51,10 @@ def convert():
         passage = passage_dict[id]
         if len(passage) <= MAX_LENGTH:
             corrected = passage.replace(wrong, correction)
-            passage_dict[id] = corrected # there might be more mistakes to this passage so we need to update the passage
+            passage_dict[id] = corrected.replace(" ", "") # there might be more mistakes to this passage so we need to update the passage
             if id not in passages:
-                passages[id] = passage # the very first untampered source sentence
-            correcteds[id] = corrected
+                passages[id] = passage.replace(" ", "") # the very first untampered source sentence
+            correcteds[id] = corrected.replace(" ", "")
     f.close()
 
     f = open("data/sighan8csc_release1.0/Training/SIGHAN15_CSC_B2_Training.sgml", "r")
@@ -70,10 +70,10 @@ def convert():
         passage = passage_dict[id]
         if len(passage) <= MAX_LENGTH:
             corrected = passage.replace(wrong, correction)
-            passage_dict[id] = corrected # there might be more mistakes to this passage so we need to update the passage
+            passage_dict[id] = corrected.replace(" ", "") # there might be more mistakes to this passage so we need to update the passage
             if id not in passages:
-                passages[id] = passage # the very first untampered source sentence
-            correcteds[id] = corrected
+                passages[id] = passage.replace(" ", "") # the very first untampered source sentence
+            correcteds[id] = corrected.replace(" ", "")
     f.close()
 
     f = open("data/clp14csc_release1.1/Training/B1_training.sgml", "r")
@@ -89,10 +89,10 @@ def convert():
         passage = passage_dict[id]
         if len(passage) <= MAX_LENGTH:
             corrected = passage.replace(wrong, correction)
-            passage_dict[id] = corrected # there might be more mistakes to this passage so we need to update the passage
+            passage_dict[id] = corrected.replace(" ", "") # there might be more mistakes to this passage so we need to update the passage
             if id not in passages:
-                passages[id] = passage # the very first untampered source sentence
-            correcteds[id] = corrected
+                passages[id] = passage.replace(" ", "") # the very first untampered source sentence
+            correcteds[id] = corrected.replace(" ", "")
     f.close()
     
     f = open("data/clp14csc_release1.1/Training/C1_training.sgml", "r")
@@ -108,10 +108,10 @@ def convert():
         passage = passage_dict[id]
         if len(passage) <= MAX_LENGTH:
             corrected = passage.replace(wrong, correction)
-            passage_dict[id] = corrected # there might be more mistakes to this passage so we need to update the passage
+            passage_dict[id] = corrected.replace(" ", "") # there might be more mistakes to this passage so we need to update the passage
             if id not in passages:
-                passages[id] = passage # the very first untampered source sentence
-            correcteds[id] = corrected
+                passages[id] = passage.replace(" ", "") # the very first untampered source sentence
+            correcteds[id] = corrected.replace(" ", "")
     f.close()
 
     """f = open("data/pycorrector_data.txt", "r")
@@ -125,14 +125,15 @@ def convert():
 
     p, c = [], []
     for id in passages.keys():
-        p.append(passages[id])
-        c.append(correcteds[id])
+        if len(passages[id]) == len(correcteds[id]):
+            p.append(passages[id])
+            c.append(correcteds[id])
 
 
     dataset = pd.DataFrame(columns=['source','reference'])
     dataset['source'] = p
     dataset['reference'] = c
-    dataset.to_csv("data/sighan10.csv", index=False)
+    dataset.to_csv("data/sigha50.csv", index=False)
 
 if __name__ == "__main__":
     convert()

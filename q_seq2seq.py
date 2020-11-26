@@ -24,8 +24,8 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 SOS_token = 0
 EOS_token = 1
-MAX_LENGTH = 12
-FILE_PATH = "data/sighan10.csv"
+MAX_LENGTH = 52
+FILE_PATH = "data/sighan50.csv"
 
 def loadData():
     df = pd.read_csv(FILE_PATH)
@@ -47,13 +47,13 @@ class Trainer(object):
 
     def run(self):
         try:
-            loaded = torch.load('q/misc.pt')
+            loaded = torch.load('q_1e6_confusion_sighan50misc.pt')
             epoch_trained = loaded['epoch']
             reward = loaded['reward']
             eval_rewards = loaded['eval_reward']
             t = loaded['t']
             num_param_updates = loaded['num_param_updates']
-            replay_buffer_params = torch.load('q/replay_buffer.pt')
+            replay_buffer_params = torch.load('q_1e6_confusion_sighan50replay_buffer.pt')
         except Exception as e:
             print("Exception in loading misc due to", e)
             epoch_trained = 0
@@ -91,19 +91,19 @@ class Trainer(object):
             self.reward = reward
             self.eval_rewards = eval_rewards
 
-            torch.save(self.agent.critic.q_target_decoder.state_dict(), 'q/q_target_decoder.pt')
-            torch.save(self.agent.critic.q_decoder.state_dict(), 'q/q_decoder.pt')
-            torch.save(self.agent.critic.optimizer.state_dict(), 'q/optimizer.pt')
-            torch.save(self.agent.critic.learning_rate_scheduler.state_dict(), 'q/learning_rate_scheduler.pt')
-            torch.save({'epoch': epoch_trained + i, 'reward': self.reward, 'eval_reward': self.eval_rewards, 't':self.agent.t, 'num_param_updates': self.agent.num_param_updates}, 'q/misc.pt')
+            torch.save(self.agent.critic.q_target_decoder.state_dict(), 'q_1e6_confusion_sighan50q_target_decoder.pt')
+            torch.save(self.agent.critic.q_decoder.state_dict(), 'q_1e6_confusion_sighan50q_decoder.pt')
+            torch.save(self.agent.critic.optimizer.state_dict(), 'q_1e6_confusion_sighan50optimizer.pt')
+            torch.save(self.agent.critic.learning_rate_scheduler.state_dict(), 'q_1e6_confusion_sighan50learning_rate_scheduler.pt')
+            torch.save({'epoch': epoch_trained + i, 'reward': self.reward, 'eval_reward': self.eval_rewards, 't':self.agent.t, 'num_param_updates': self.agent.num_param_updates}, 'q_1e6_confusion_sighan50misc.pt')
             torch.save({"next_idx":self.agent.replay_buffer.next_idx, 
                         "num_in_buffer":self.agent.replay_buffer.num_in_buffer, 
                         "obs":self.agent.replay_buffer.obs, 
                         "action":self.agent.replay_buffer.action, 
                         "reward":self.agent.replay_buffer.reward, 
-                        "done":self.agent.replay_buffer.done}, 'q/replay_buffer.pt')
-            torch.save(self.agent.env.encoder.state_dict(),'q/env_encoder.pt')
-            torch.save(self.agent.env.decoder.state_dict(),'q/env_decoder.pt')
+                        "done":self.agent.replay_buffer.done}, 'q_1e6_confusion_sighan50replay_buffer.pt')
+            torch.save(self.agent.env.encoder.state_dict(),'q_1e6_confusion_sighan50env_encoder.pt')
+            torch.save(self.agent.env.decoder.state_dict(),'q_1e6_confusion_sighan50env_decoder.pt')
             print("Trained {} iterations in total".format(epoch_trained + i))
         
 
@@ -153,7 +153,7 @@ class WeakEnvironment(object):
     def __init__(self, train_data, test_data):
         self.encoder = EncoderRNN()
         try:
-          self.encoder.load_state_dict(torch.load('q/env_encoder.pt'))
+          self.encoder.load_state_dict(torch.load('q_1e6_confusion_sighan50env_encoder.pt'))
         except Exception as e:
           print("Attempting to load env encoder due to", e)
         self.encoder.eval()
@@ -166,7 +166,7 @@ class WeakEnvironment(object):
         # decoder doesn't return actions but Q values, so no action distribution, only action based on Q values
         self.decoder = AttnDecoder(self.encoder.hidden_size, self.encoder.input_size)
         try:
-          self.decoder.load_state_dict(torch.load('q/env_decoder.pt'))
+          self.decoder.load_state_dict(torch.load('q_1e6_confusion_sighan50env_decoder.pt'))
         except Exception as e:
           print("Attempting to load env decoder due to", e)
         self.decoder.eval()
@@ -205,7 +205,7 @@ class WeakEnvironment(object):
             reward = 10 #5/(((abs(l)**3)+1e-5) + 0.05)
         else:
             reward = -1 #
-
+        assert len(target_id) == len(observation[0]), observation[0]
         if curr_index + 1 == len(target_id):
             done = True
             next_observation = []
@@ -318,9 +318,9 @@ class DQNCritic(object):
         self.q_target_decoder = AttnDecoder(self.encoder.hidden_size, self.encoder.input_size)
         self.q_decoder = AttnDecoder(self.encoder.hidden_size, self.encoder.input_size)
         try:
-          self.q_target_decoder.load_state_dict(torch.load('q/q_target_decoder.pt'))
+          self.q_target_decoder.load_state_dict(torch.load('q_1e6_confusion_sighan50q_target_decoder.pt'))
           self.q_target_decoder.train()
-          self.q_decoder.load_state_dict(torch.load('q/q_decoder.pt'))
+          self.q_decoder.load_state_dict(torch.load('q_1e6_confusion_sighan50q_decoder.pt'))
           self.q_decoder.train()
           print("奥利给!Model Loaded!")
         except Exception as e:
@@ -334,7 +334,7 @@ class DQNCritic(object):
             **self.optimizer_spec.optim_kwargs
         )
         try: 
-          self.optimizer.load_state_dict(torch.load('q/optimizer.pt'))
+          self.optimizer.load_state_dict(torch.load('q_1e6_confusion_sighan50optimizer.pt'))
           print("奥利给!Optimizer Loaded!")
         except Exception as e:
           print("Attempting to load q optimizer but failed due to", e)
@@ -343,7 +343,7 @@ class DQNCritic(object):
             self.optimizer_spec.learning_rate_schedule,
         )
         try: 
-          self.learning_rate_scheduler.load_state_dict(torch.load('q/learning_rate_scheduler.pt'))
+          self.learning_rate_scheduler.load_state_dict(torch.load('q_1e6_confusion_sighan50learning_rate_scheduler.pt'))
           print("奥利给!Learning rate scheduler Loaded!")
         except Exception as e:
           print("Attempting to load q learning rate scheduler but failed due to", e)
@@ -431,22 +431,18 @@ class ArgMaxPolicy(object):
         observation = np.array(obs, dtype=object).reshape(-1,5)
         
         qval = self.critic.qa_values(observation)
-        action_variance = np.sqrt(2*np.log(self.t))/self.seen_action
-        explorating_qval = qval+action_variance
+        action_variance = np.sqrt(2*np.log(self.t)/self.seen_action)
+        qval = qval+action_variance
         batch_size = len(observation)
 
         next_pos_to_predict = observation[:,4].tolist()
         src = observation[:,0].tolist()
-        
+        #print(self.t, src, next_pos_to_predict)
         next_id_in_src = [self.lang.word2index[src[i][next_pos_to_predict[i]]] for i in range(batch_size)]
         # you have to allow itself to be predicted as well
-        # TODO: make this batchable here we assume only batch of 1
-        if len(self.lang.correct_confused[next_id_in_src[0]]) != 0:
-          easily_confused = [self.lang.correct_confused[id] for id in next_id_in_src]
-          qval_of_interest = [(easily_confused[i],qval[easily_confused[i]]) for i in range(batch_size)]
-          action = np.array([q[0][np.argmax(q[1])] for q in qval_of_interest])
-        else:
-          action = np.array([np.argmax(qval)])
+        easily_confused = [self.lang.correct_confused[id] for id in next_id_in_src]
+        qval_of_interest = [(easily_confused[i],qval[easily_confused[i]]) for i in range(batch_size)]
+        action = np.array([q[0][np.argmax(q[1])] for q in qval_of_interest])
 
         return action
 
