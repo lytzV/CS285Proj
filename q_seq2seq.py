@@ -43,22 +43,31 @@ class Trainer(object):
         self.train_n_iter = trainer_params['train_n_iter']
         self.train_batch_size = trainer_params['train_batch_size']
         self.reward = []
-        self.eval_rewards = []
+        #self.eval_rewards = []
+        self.precision = []
+        self.recall = []
+        self.fhalf = []
 
     def run(self):
         try:
-            loaded = torch.load('q_1e6_confusion_sighan50misc.pt')
+            loaded = torch.load('q_learning_ckpts/misc.pt')
             epoch_trained = loaded['epoch']
             reward = loaded['reward']
-            eval_rewards = loaded['eval_reward']
+            #eval_rewards = loaded['eval_reward']
+            precision = loaded['precision']
+            recall = loaded['recall']
+            fhalf = loaded['fhalf']
             t = loaded['t']
             num_param_updates = loaded['num_param_updates']
-            replay_buffer_params = torch.load('q_1e6_confusion_sighan50replay_buffer.pt')
+            replay_buffer_params = torch.load('q_learning_ckpts/replay_buffer.pt')
         except Exception as e:
             print("Exception in loading misc due to", e)
             epoch_trained = 0
             reward = [] 
-            eval_rewards = []
+            #eval_rewards = []
+            precision = []
+            recall = []
+            fhalf = []
             t = 0
             num_param_updates = 0
             replay_buffer_params = {"next_idx":0, "num_in_buffer":0, "obs":None, "action":None, "reward":None, "done":None}
@@ -79,31 +88,40 @@ class Trainer(object):
                     print("Progress {:.2f}%, with average reward {}".format(i*100/self.n_iter, r/report_period))
                     self.reward.append(r/report_period)
                     r = 0
-                    eval_reward = self.evaluate()
-                    self.eval_rewards.append(eval_reward)
+                    p, r, f = self.evaluate()
+                    #self.eval_rewards.append(eval_reward)
+                    self.precision.append(p)
+                    self.recall.append(r)
+                    self.fhalf.append(f)
         except:
             print("Exception has occured, saving models now...")
             #print("Exception due to", e)
             traceback.print_exc()
         finally:
             reward.extend(self.reward) #agglomerate historic rewards
-            eval_rewards.extend(self.eval_rewards)
+            #eval_rewards.extend(self.eval_rewards)
+            precision.extend(self.precision)
+            recall.extend(self.recall)
+            fhalf.extend(self.fhalf)
             self.reward = reward
-            self.eval_rewards = eval_rewards
+            #self.eval_rewards = eval_rewards
+            self.precision = precision
+            self.recall = recall
+            self.fhalf = fhalf
 
-            torch.save(self.agent.critic.q_target_decoder.state_dict(), 'q_1e6_confusion_sighan50q_target_decoder.pt')
-            torch.save(self.agent.critic.q_decoder.state_dict(), 'q_1e6_confusion_sighan50q_decoder.pt')
-            torch.save(self.agent.critic.optimizer.state_dict(), 'q_1e6_confusion_sighan50optimizer.pt')
-            torch.save(self.agent.critic.learning_rate_scheduler.state_dict(), 'q_1e6_confusion_sighan50learning_rate_scheduler.pt')
-            torch.save({'epoch': epoch_trained + i, 'reward': self.reward, 'eval_reward': self.eval_rewards, 't':self.agent.t, 'num_param_updates': self.agent.num_param_updates}, 'q_1e6_confusion_sighan50misc.pt')
+            torch.save(self.agent.critic.q_target_decoder.state_dict(), 'q_learning_ckpts/q_target_decoder.pt')
+            torch.save(self.agent.critic.q_decoder.state_dict(), 'q_learning_ckpts/q_decoder.pt')
+            torch.save(self.agent.critic.optimizer.state_dict(), 'q_learning_ckpts/optimizer.pt')
+            torch.save(self.agent.critic.learning_rate_scheduler.state_dict(), 'q_learning_ckpts/learning_rate_scheduler.pt')
+            torch.save({'epoch': epoch_trained + i, 'reward': self.reward, 'precision':self.precision, 'recall':self.recall, 'fhalf':self.fhalf, 't':self.agent.t, 'num_param_updates': self.agent.num_param_updates}, 'q_learning_ckpts/misc.pt')
             torch.save({"next_idx":self.agent.replay_buffer.next_idx, 
                         "num_in_buffer":self.agent.replay_buffer.num_in_buffer, 
                         "obs":self.agent.replay_buffer.obs, 
                         "action":self.agent.replay_buffer.action, 
                         "reward":self.agent.replay_buffer.reward, 
-                        "done":self.agent.replay_buffer.done}, 'q_1e6_confusion_sighan50replay_buffer.pt')
-            torch.save(self.agent.env.encoder.state_dict(),'q_1e6_confusion_sighan50env_encoder.pt')
-            torch.save(self.agent.env.decoder.state_dict(),'q_1e6_confusion_sighan50env_decoder.pt')
+                        "done":self.agent.replay_buffer.done}, 'q_learning_ckpts/replay_buffer.pt')
+            torch.save(self.agent.env.encoder.state_dict(),'q_learning_ckpts/env_encoder.pt')
+            torch.save(self.agent.env.decoder.state_dict(),'q_learning_ckpts/env_decoder.pt')
             print("Trained {} iterations in total".format(epoch_trained + i))
         
 
@@ -130,6 +148,8 @@ class Trainer(object):
             print('')
         print("Test Set Eval")"""
         steps, r = 0, 0
+        gold, edit, true_edit = 0, 0, 0
+        precision, recall, fhalf = 0, 0, 0
         for t in self.agent.env.test_data:
             src = t[0]
             trg = t[1]
@@ -137,13 +157,28 @@ class Trainer(object):
             translated = []
             for i in range(len(trg)):
                 action = self.agent.actor.get_actions(test_obs)
+                action_word = self.agent.env.lang.index2word[action[0]]
+                # print("src: " + str(src[i]))
+                # print("trg: " + str(trg[i]))
+                # print("action: " + str(action[0]))
+                if src[i] != trg[i]:
+                    gold += 1
+                if src[i] != action_word:
+                    edit += 1
+                if src[i] != trg[i] and src[i] != action_word and action_word == trg[i]:
+                    true_edit += 1
                 obs, reward, done = self.agent.env.step(test_obs, action)
                 translated.append(self.agent.env.lang.index2word[action.item()])
                 test_obs = obs
-
                 steps += 1
                 r += reward
-        return r/steps
+        precision = true_edit / edit
+        recall = true_edit / gold
+        fhalf = (1 + 0.5**2) * precision * recall / (recall + 0.5**2 * precision)
+        print("precision: " + str(precision))
+        print("recall: " + str(recall))
+        print("fhalf: " + str(fhalf))
+        return precision, recall, fhalf
             #print('=', src)
             #print('<', trg)
             #print('>', ''.join(translated))
@@ -153,7 +188,7 @@ class WeakEnvironment(object):
     def __init__(self, train_data, test_data):
         self.encoder = EncoderRNN()
         try:
-          self.encoder.load_state_dict(torch.load('q_1e6_confusion_sighan50env_encoder.pt'))
+          self.encoder.load_state_dict(torch.load('q_learning_ckpts/env_encoder.pt'))
         except Exception as e:
           print("Attempting to load env encoder due to", e)
         self.encoder.eval()
@@ -166,7 +201,7 @@ class WeakEnvironment(object):
         # decoder doesn't return actions but Q values, so no action distribution, only action based on Q values
         self.decoder = AttnDecoder(self.encoder.hidden_size, self.encoder.input_size)
         try:
-          self.decoder.load_state_dict(torch.load('q_1e6_confusion_sighan50env_decoder.pt'))
+          self.decoder.load_state_dict(torch.load('q_learning_ckpts/env_decoder.pt'))
         except Exception as e:
           print("Attempting to load env decoder due to", e)
         self.decoder.eval()
@@ -318,9 +353,9 @@ class DQNCritic(object):
         self.q_target_decoder = AttnDecoder(self.encoder.hidden_size, self.encoder.input_size)
         self.q_decoder = AttnDecoder(self.encoder.hidden_size, self.encoder.input_size)
         try:
-          self.q_target_decoder.load_state_dict(torch.load('q_1e6_confusion_sighan50q_target_decoder.pt'))
+          self.q_target_decoder.load_state_dict(torch.load('q_learning_ckpts/q_target_decoder.pt'))
           self.q_target_decoder.train()
-          self.q_decoder.load_state_dict(torch.load('q_1e6_confusion_sighan50q_decoder.pt'))
+          self.q_decoder.load_state_dict(torch.load('q_learning_ckpts/q_decoder.pt'))
           self.q_decoder.train()
           print("奥利给!Model Loaded!")
         except Exception as e:
@@ -334,7 +369,7 @@ class DQNCritic(object):
             **self.optimizer_spec.optim_kwargs
         )
         try: 
-          self.optimizer.load_state_dict(torch.load('q_1e6_confusion_sighan50optimizer.pt'))
+          self.optimizer.load_state_dict(torch.load('q_learning_ckpts/optimizer.pt'))
           print("奥利给!Optimizer Loaded!")
         except Exception as e:
           print("Attempting to load q optimizer but failed due to", e)
@@ -343,7 +378,7 @@ class DQNCritic(object):
             self.optimizer_spec.learning_rate_schedule,
         )
         try: 
-          self.learning_rate_scheduler.load_state_dict(torch.load('q_1e6_confusion_sighan50learning_rate_scheduler.pt'))
+          self.learning_rate_scheduler.load_state_dict(torch.load('q_learning_ckpts/learning_rate_scheduler.pt'))
           print("奥利给!Learning rate scheduler Loaded!")
         except Exception as e:
           print("Attempting to load q learning rate scheduler but failed due to", e)

@@ -1,5 +1,7 @@
 
-from q_seq2seq import * 
+from q_seq2seq import *
+import matplotlib  
+matplotlib.use('TkAgg')
 import matplotlib.pyplot as plt
 
 def showPlot(points):
@@ -52,4 +54,4 @@ if __name__ == "__main__":
 
     trainer = Trainer(agent_params, trainer_params)
     trainer.run()
-    showPlot({"Train":trainer.reward, "Eval":trainer.eval_rewards})
+    showPlot({"Train":trainer.reward, "Precision":trainer.precision, "Recall":trainer.recall, "Fhalf":trainer.fhalf})
