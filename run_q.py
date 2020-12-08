@@ -54,4 +54,5 @@ if __name__ == "__main__":
 
     trainer = Trainer(agent_params, trainer_params)
     trainer.run()
-    showPlot({"Train":trainer.reward, "Precision":trainer.precision, "Recall":trainer.recall, "Fhalf":trainer.fhalf})
+    showPlot({"Train":trainer.reward})
+    showPlot({"Precision":trainer.precision, "Recall":trainer.recall, "Fhalf":trainer.fhalf})
