@@ -50,7 +50,7 @@ class Trainer(object):
 
     def run(self):
         try:
-            loaded = torch.load('q_learning_ckpts/misc.pt')
+            loaded = torch.load('q_test/misc.pt')
             epoch_trained = loaded['epoch']
             reward = loaded['reward']
             #eval_rewards = loaded['eval_reward']
@@ -59,7 +59,7 @@ class Trainer(object):
             fhalf = loaded['fhalf']
             t = loaded['t']
             num_param_updates = loaded['num_param_updates']
-            replay_buffer_params = torch.load('q_learning_ckpts/replay_buffer.pt')
+            replay_buffer_params = torch.load('q_test/replay_buffer.pt')
         except Exception as e:
             print("Exception in loading misc due to", e)
             epoch_trained = 0
@@ -109,19 +109,19 @@ class Trainer(object):
             self.recall = recall
             self.fhalf = fhalf
 
-            torch.save(self.agent.critic.q_target_decoder.state_dict(), 'q_learning_ckpts/q_target_decoder.pt')
-            torch.save(self.agent.critic.q_decoder.state_dict(), 'q_learning_ckpts/q_decoder.pt')
-            torch.save(self.agent.critic.optimizer.state_dict(), 'q_learning_ckpts/optimizer.pt')
-            torch.save(self.agent.critic.learning_rate_scheduler.state_dict(), 'q_learning_ckpts/learning_rate_scheduler.pt')
-            torch.save({'epoch': epoch_trained + i, 'reward': self.reward, 'precision':self.precision, 'recall':self.recall, 'fhalf':self.fhalf, 't':self.agent.t, 'num_param_updates': self.agent.num_param_updates}, 'q_learning_ckpts/misc.pt')
+            torch.save(self.agent.critic.q_target_decoder.state_dict(), 'q_test/q_target_decoder.pt')
+            torch.save(self.agent.critic.q_decoder.state_dict(), 'q_test/q_decoder.pt')
+            torch.save(self.agent.critic.optimizer.state_dict(), 'q_test/optimizer.pt')
+            torch.save(self.agent.critic.learning_rate_scheduler.state_dict(), 'q_test/learning_rate_scheduler.pt')
+            torch.save({'epoch': epoch_trained + i, 'reward': self.reward, 'precision':self.precision, 'recall':self.recall, 'fhalf':self.fhalf, 't':self.agent.t, 'num_param_updates': self.agent.num_param_updates}, 'q_test/misc.pt')
             torch.save({"next_idx":self.agent.replay_buffer.next_idx, 
                         "num_in_buffer":self.agent.replay_buffer.num_in_buffer, 
                         "obs":self.agent.replay_buffer.obs, 
                         "action":self.agent.replay_buffer.action, 
                         "reward":self.agent.replay_buffer.reward, 
-                        "done":self.agent.replay_buffer.done}, 'q_learning_ckpts/replay_buffer.pt')
-            torch.save(self.agent.env.encoder.state_dict(),'q_learning_ckpts/env_encoder.pt')
-            torch.save(self.agent.env.decoder.state_dict(),'q_learning_ckpts/env_decoder.pt')
+                        "done":self.agent.replay_buffer.done}, 'q_test/replay_buffer.pt')
+            torch.save(self.agent.env.encoder.state_dict(),'q_test/env_encoder.pt')
+            torch.save(self.agent.env.decoder.state_dict(),'q_test/env_decoder.pt')
             print("Trained {} iterations in total".format(epoch_trained + i))
         
 
@@ -188,7 +188,7 @@ class WeakEnvironment(object):
     def __init__(self, train_data, test_data):
         self.encoder = EncoderRNN()
         try:
-          self.encoder.load_state_dict(torch.load('q_learning_ckpts/env_encoder.pt'))
+          self.encoder.load_state_dict(torch.load('q_test/env_encoder.pt'))
         except Exception as e:
           print("Attempting to load env encoder due to", e)
         self.encoder.eval()
@@ -201,7 +201,7 @@ class WeakEnvironment(object):
         # decoder doesn't return actions but Q values, so no action distribution, only action based on Q values
         self.decoder = AttnDecoder(self.encoder.hidden_size, self.encoder.input_size)
         try:
-          self.decoder.load_state_dict(torch.load('q_learning_ckpts/env_decoder.pt'))
+          self.decoder.load_state_dict(torch.load('q_test/env_decoder.pt'))
         except Exception as e:
           print("Attempting to load env decoder due to", e)
         self.decoder.eval()
@@ -237,7 +237,7 @@ class WeakEnvironment(object):
         # the reward can't be too large, otherwise will only learn little to be satisified
         # a reward of x means that 1 correct prediction will be killed by x incorrect predictions
         if (action == target_id[curr_index]):
-            reward = 10 #5/(((abs(l)**3)+1e-5) + 0.05)
+            reward = 5 #5/(((abs(l)**3)+1e-5) + 0.05)
         else:
             reward = -1 #
         assert len(target_id) == len(observation[0]), observation[0]
@@ -353,9 +353,9 @@ class DQNCritic(object):
         self.q_target_decoder = AttnDecoder(self.encoder.hidden_size, self.encoder.input_size)
         self.q_decoder = AttnDecoder(self.encoder.hidden_size, self.encoder.input_size)
         try:
-          self.q_target_decoder.load_state_dict(torch.load('q_learning_ckpts/q_target_decoder.pt'))
+          self.q_target_decoder.load_state_dict(torch.load('q_test/q_target_decoder.pt'))
           self.q_target_decoder.train()
-          self.q_decoder.load_state_dict(torch.load('q_learning_ckpts/q_decoder.pt'))
+          self.q_decoder.load_state_dict(torch.load('q_test/q_decoder.pt'))
           self.q_decoder.train()
           print("奥利给!Model Loaded!")
         except Exception as e:
@@ -369,7 +369,7 @@ class DQNCritic(object):
             **self.optimizer_spec.optim_kwargs
         )
         try: 
-          self.optimizer.load_state_dict(torch.load('q_learning_ckpts/optimizer.pt'))
+          self.optimizer.load_state_dict(torch.load('q_test/optimizer.pt'))
           print("奥利给!Optimizer Loaded!")
         except Exception as e:
           print("Attempting to load q optimizer but failed due to", e)
@@ -378,7 +378,7 @@ class DQNCritic(object):
             self.optimizer_spec.learning_rate_schedule,
         )
         try: 
-          self.learning_rate_scheduler.load_state_dict(torch.load('q_learning_ckpts/learning_rate_scheduler.pt'))
+          self.learning_rate_scheduler.load_state_dict(torch.load('q_test/learning_rate_scheduler.pt'))
           print("奥利给!Learning rate scheduler Loaded!")
         except Exception as e:
           print("Attempting to load q learning rate scheduler but failed due to", e)
