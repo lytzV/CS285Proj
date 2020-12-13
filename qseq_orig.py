@@ -156,7 +156,7 @@ class Trainer(object):
             test_obs = self.agent.env.reset(True, t)
             translated = []
             for i in range(len(trg)):
-                [action, q] = self.agent.actor.get_actions(test_obs)
+                action = self.agent.actor.get_actions(test_obs)
                 action_word = self.agent.env.lang.index2word[action[0]]
                 # print("src: " + str(src[i]))
                 # print("trg: " + str(trg[i]))
@@ -222,19 +222,14 @@ class WeakEnvironment(object):
     def step(self, observation, action):
         # observation is [src plain, encoder padded, decoder hidden, curr_input, curr_index]
         # action is the action distribution
-        if(type(action)==list):
-            ac, q = action[0], action[1]
-        else:
-            ac, q = action, [1]
         done = False
-        src_id = self.input_ids[observation[0]][0]
         target_id = self.input_ids[observation[0]][1]
         curr_index = observation[4]
         
         prev_hidden = torch.from_numpy(observation[2])
         encoder_padded = torch.from_numpy(observation[1])
 
-        action_cur = torch.tensor([[ac[0]]]).to(self.device)
+        action_cur = torch.tensor([[action[0]]]).to(self.device)
         prev_hidden = prev_hidden.to(self.device)
         decoded_result = self.decoder(action_cur, prev_hidden, encoder_padded)
         next_hidden = ptu.to_numpy(decoded_result[1].detach())
@@ -242,31 +237,6 @@ class WeakEnvironment(object):
         # the reward can't be too small, otherwise no signal
         # the reward can't be too large, otherwise will only learn little to be satisified
         # a reward of x means that 1 correct prediction will be killed by x incorrect predictions
-        """if (ac == target_id[curr_index]):
-            q_sum = sum(q)
-            q_max = max(q)
-            # the more unsure you are the more i encourage you for making that decision
-            if (src_id[curr_index] != target_id[curr_index]):
-                # this is a true edit-->boost low confidence
-                reward = 10*len(q)/(q_max/q_sum)
-            else:
-                # this is correctly not editting, recognizing that is hard! boost!
-                reward = 20*len(q)/(q_max/q_sum) #5/(((abs(l)**3)+1e-5) + 0.05)
-            #if(type(action)==list):
-            #    print("correct:",str(q_max*100/q_sum))
-        else:
-            q_sum = sum(q)
-            q_max = max(q)
-            # the more sure you are the more i discourage you for making that decision
-            if (src_id[curr_index] != target_id[curr_index]):
-                # this should be editted but yielded wrong edits
-                reward = -10*(q_max/q_sum)
-            else:
-                # this should not be editted yet you did, severe punishment
-                reward = -50 # to punish the fact that we made way too many edits when unnecessary
-            #if(type(action)==list):
-            #    print("wrong:",str(q_max*100/q_sum))
-        #print(self.lang.index2word[target_id[curr_index]], self.lang.index2word[src_id[curr_index]])"""
         if (action == target_id[curr_index]):
             reward = 10 #5/(((abs(l)**3)+1e-5) + 0.05)
         else:
@@ -276,7 +246,8 @@ class WeakEnvironment(object):
             done = True
             next_observation = []
         else:
-            next_observation = [observation[0], observation[1], next_hidden, ac, observation[4]+1]
+            next_observation = [observation[0], observation[1], next_hidden, action, observation[4]+1]
+    
         return next_observation, reward, done
     def reset(self, deterministic_input=False, deterministic_pair=None):
         if deterministic_input:
@@ -331,7 +302,6 @@ class DQNAgent(object):
         self.replay_buffer_idx = self.replay_buffer.store_frame(self.last_obs)
         eps = self.exploration.value(self.t)
         is_random = ((np.random.random() <= eps) or (self.t < self.learning_starts))
-        
         if not is_random:
             recent_obs = self.replay_buffer.encode_recent_observation()
             action = self.actor.get_actions(recent_obs)
@@ -349,8 +319,6 @@ class DQNAgent(object):
 
         obs, reward, done = self.env.step(self.last_obs, action)
         self.last_obs = obs
-        if(type(action)==list):
-            action = action[0]
         self.replay_buffer.store_effect(self.replay_buffer_idx, action, reward, done)
         self.actor.seen_action[action[0]] += 1 # update the number of times seen
 
@@ -512,7 +480,7 @@ class ArgMaxPolicy(object):
         qval_of_interest = [(easily_confused[i],qval[easily_confused[i]]) for i in range(batch_size)]
         action = np.array([q[0][np.argmax(q[1])] for q in qval_of_interest])
 
-        return [action, qval_of_interest[0][1]]
+        return action
 
 class ReplayBuffer(object):
     def __init__(self, size, frame_history_len, params):
